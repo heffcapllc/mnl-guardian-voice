@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MNL Guardian</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #0b1020;
+      color: #edf2ff;
+      font-family: Arial, sans-serif;
+      padding: 24px;
+    }
+
+    .guardian {
+      width: 100%;
+      max-width: 520px;
+      text-align: center;
+      padding: 36px 24px;
+      background: #151d32;
+      border: 1px solid #293653;
+      border-radius: 22px;
+      box-shadow: 0 20px 60px #0005;
+    }
+
+    h1 {
+      font-size: 32px;
+      margin-bottom: 8px;
+      letter-spacing: 2px;
+    }
+
+    .subtitle {
+      color: #a8b6d5;
+      margin-bottom: 28px;
+    }
+
+    .orb {
+      width: 110px;
+      height: 110px;
+      margin: 24px auto;
+      border-radius: 50%;
+      background: radial-gradient(
+        circle, #83eaff, #3978df 55%, #18294d
+      );
+      box-shadow: 0 0 35px #438bff66;
+      transition: 0.3s;
+    }
+
+    .orb.listening {
+      animation: pulse 1.2s infinite;
+    }
+
+    @keyframes pulse {
+      50% {
+        box-shadow: 0 0 55px #65eaff;
+        transform: scale(1.06);
+      }
+    }
+
+    button {
+      border: 0;
+      border-radius: 12px;
+      padding: 14px 22px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      margin: 8px;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    #talk {
+      background: #62d8ff;
+      color: #081426;
+    }
+
+    #stop {
+      background: #34415c;
+      color: white;
+    }
+
+    #status {
+      color: #83eaff;
+      min-height: 24px;
+      margin: 20px 0;
+    }
+
+    #heard {
+      padding: 14px;
+      min-height: 55px;
+      border-radius: 12px;
+      background: #0d1426;
+      color: #d7e2fa;
+      overflow-wrap: anywhere;
+    }
+
+    .note {
+      font-size: 12px;
+      color: #8999b9;
+      margin-top: 24px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+
+<body>
+  <main class="guardian">
+    <h1>MNL GUARDIAN</h1>
+
+    <p class="subtitle">
+      Your intelligent business assistant
+    </p>
+
+    <div id="orb" class="orb"></div>
+
+    <p id="status" role="status" aria-live="polite">
+      Guardian is standing by.
+    </p>
+
+    <button id="talk">🎙 Talk to Guardian</button>
+    <button id="stop">Stop</button>
+
+    <h3>You said:</h3>
+
+    <div id="heard" aria-live="polite">
+      Waiting for your voice...
+    </div>
+
+    <p class="note">
+      MNL Cap LLC · Guardian Voice Interface<br>
+      Voice recognition requires a supported browser
+      and microphone access.
+    </p>
+  </main>
+
+  <script>
+    const statusText = document.getElementById("status");
+    const heardText = document.getElementById("heard");
+    const orb = document.getElementById("orb");
+    const talkButton = document.getElementById("talk");
+    const stopButton = document.getElementById("stop");
+
+    const SpeechRecognition =
+      window.SpeechRecognition ||
+      window.webkitSpeechRecognition;
+
+    let recognition = null;
+    let listening = false;
+
+    function setStatus(message) {
+      statusText.textContent = message;
+    }
+
+    function speak(message) {
+      if (!("speechSynthesis" in window)) {
+        setStatus(message);
+        return;
+      }
+
+      window.speechSynthesis.cancel();
+
+      const speech = new SpeechSynthesisUtterance(message);
+
+      speech.lang = "en-GB";
+      speech.rate = 0.92;
+      speech.pitch = 0.9;
+
+      const voices = window.speechSynthesis.getVoices();
+
+      const britishVoice = voices.find(voice =>
+        voice.lang === "en-GB" &&
+        /daniel|george|oliver/i.test(voice.name)
+      );
+
+      if (britishVoice) {
+        speech.voice = britishVoice;
+      }
+
+      speech.onstart = () => {
+        setStatus("Guardian is speaking...");
+      };
+
+      speech.onend = () => {
+        setStatus("Guardian is standing by.");
+      };
+
+      speech.onerror = () => {
+        setStatus("Speech output encountered a problem.");
+      };
+
+      window.speechSynthesis.speak(speech);
+    }
+
+    function handleCommand(transcript) {
+      const command = transcript.toLowerCase();
+
+      if (
+        command.includes("hello") ||
+        command.includes("hey guardian")
+      ) {
+        speak(
+          "Good day. MNL Guardian is online and ready."
+        );
+      } else if (
+        command.includes("how are you") ||
+        command.includes("business today")
+      ) {
+        speak(
+          "I am ready to assist. Your business systems " +
+          "are not connected yet."
+        );
+      } else if (command.includes("your name")) {
+        speak(
+          "I am MNL Guardian, your business assistant."
+        );
+      } else if (command.includes("stop")) {
+        window.speechSynthesis.cancel();
+        setStatus("Guardian has stopped speaking.");
+      } else {
+        speak(
+          "I heard you say: " + transcript +
+          ". My business integrations are not connected yet."
+        );
+      }
+    }
+
+    if (!SpeechRecognition) {
+      talkButton.disabled = true;
+
+      setStatus(
+        "Speech recognition is not supported in this browser."
+      );
+    } else {
+      recognition = new SpeechRecognition();
+
+      recognition.lang = "en-US";
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+
+      recognition.onstart = () => {
+        listening = true;
+        orb.classList.add("listening");
+        setStatus("Listening. Speak now.");
+      };
+
+      recognition.onresult = event => {
+        const transcript =
+          event.results[0][0].transcript.trim();
+
+        heardText.textContent = transcript;
+        setStatus("Voice received.");
+
+        handleCommand(transcript);
+      };
+
+      recognition.onerror = event => {
+        const messages = {
+          "not-allowed":
+            "Microphone access was denied. Check browser permissions.",
+          "service-not-allowed":
+            "The browser speech service is not permitted.",
+          "no-speech":
+            "I did not hear anything. Please try again.",
+          "network":
+            "The speech service reported a network error.",
+          "audio-capture":
+            "No working microphone was detected."
+        };
+
+        setStatus(
+          messages[event.error] ||
+          "Speech recognition error: " + event.error
+        );
+      };
+
+      recognition.onend = () => {
+        listening = false;
+        orb.classList.remove("listening");
+      };
+
+      talkButton.addEventListener("click", () => {
+        if (listening) return;
+
+        window.speechSynthesis.cancel();
+
+        try {
+          recognition.start();
+        } catch (error) {
+          setStatus(
+            "Guardian could not start listening. Please try again."
+          );
+        }
+      });
+
+      stopButton.addEventListener("click", () => {
+        if (listening) {
+          recognition.stop();
+        }
+
+        window.speechSynthesis.cancel();
+        orb.classList.remove("listening");
+
+        setStatus("Guardian stopped.");
+      });
+    }
+  </script>
+</body>
+</html>
