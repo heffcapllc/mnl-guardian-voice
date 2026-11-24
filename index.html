@@ -153,170 +153,253 @@
     const talkButton = document.getElementById("talk");
     const stopButton = document.getElementById("stop");
 
-    const SpeechRecognition =
-      window.SpeechRecognition ||
-      window.webkitSpeechRecognition;
-
-    let recognition = null;
-    let listening = false;
-
     function setStatus(message) {
-      statusText.textContent = message;
+  statusText.textContent = message;
+}
+
+const accessPanel = document.createElement("div");
+accessPanel.style.cssText = "margin:16px 0;display:grid;gap:10px;";
+
+const endpointInput = document.createElement("input");
+endpointInput.type = "url";
+endpointInput.placeholder = "Guardian realtime/session URL";
+endpointInput.setAttribute("aria-label", "Guardian endpoint");
+
+const tokenInput = document.createElement("input");
+tokenInput.type = "password";
+tokenInput.placeholder = "Guardian access token";
+tokenInput.autocomplete = "off";
+tokenInput.setAttribute("aria-label", "Guardian access token");
+
+for (const field of [endpointInput, tokenInput]) {
+  field.style.cssText = "width:100%;padding:12px;border-radius:8px;";
+  accessPanel.appendChild(field);
+}
+
+talkButton.before(accessPanel);
+
+let activeSession = null;
+
+function stopGuardian(message = "Guardian stopped.") {
+  const session = activeSession;
+  activeSession = null;
+
+  if (session) {
+    session.controller.abort();
+    session.channel?.close();
+    session.pc?.close();
+    session.stream?.getTracks().forEach(track => track.stop());
+
+    if (session.audio) {
+      session.audio.pause();
+      session.audio.srcObject = null;
+      session.audio.remove();
+    }
+  }
+
+  orb.classList.remove("listening");
+  talkButton.disabled = false;
+  setStatus(message);
+}
+
+async function startGuardian() {
+  if (activeSession) return;
+
+  let endpoint;
+
+  try {
+    endpoint = new URL(endpointInput.value.trim());
+
+    if (
+      endpoint.protocol !== "https:" ||
+      !endpoint.hostname.startsWith("mnl-guardian-ai.") ||
+      !endpoint.hostname.endsWith(".workers.dev") ||
+      endpoint.pathname !== "/realtime/session" ||
+      endpoint.search ||
+      endpoint.hash ||
+      endpoint.username ||
+      endpoint.password
+    ) {
+      throw new Error();
+    }
+  } catch {
+    setStatus("Enter your full Guardian realtime/session URL.");
+    return;
+  }
+
+  let token = tokenInput.value.trim();
+
+  if (!token) {
+    setStatus("Enter your Guardian access token.");
+    return;
+  }
+
+  tokenInput.value = "";
+
+  const session = {
+    controller: new AbortController(),
+    pc: null,
+    stream: null,
+    audio: null,
+    channel: null
+  };
+
+  activeSession = session;
+  talkButton.disabled = true;
+  setStatus("Connecting to Guardian...");
+
+  try {
+    session.stream = await navigator.mediaDevices.getUserMedia({
+      audio: true
+    });
+
+    if (activeSession !== session) {
+      session.stream.getTracks().forEach(track => track.stop());
+      return;
     }
 
-    function speak(message) {
-      if (!("speechSynthesis" in window)) {
-        setStatus(message);
-        return;
-      }
+    const pc = new RTCPeerConnection();
+    session.pc = pc;
 
-      window.speechSynthesis.cancel();
+    const audio = document.createElement("audio");
+    audio.autoplay = true;
+    audio.playsInline = true;
+    document.body.appendChild(audio);
+    session.audio = audio;
 
-      const speech = new SpeechSynthesisUtterance(message);
+    pc.ontrack = event => {
+      audio.srcObject =
+        event.streams[0] || new MediaStream([event.track]);
 
-      speech.lang = "en-GB";
-      speech.rate = 0.85;
-      speech.pitch = 0.8;
-
-      const voices = window.speechSynthesis.getVoices();
-
-      const britishVoice = voices.find(voice =>
-        voice.lang === "en-GB" &&
-        /daniel|george|oliver/i.test(voice.name)
-      );
-
-      if (britishVoice) {
-        speech.voice = britishVoice;
-      }
-
-      speech.onstart = () => {
-        setStatus("Guardian is speaking...");
-      };
-
-      speech.onend = () => {
-        setStatus("Guardian is standing by.");
-      };
-
-      speech.onerror = () => {
-        setStatus("Speech output encountered a problem.");
-      };
-
-      window.speechSynthesis.speak(speech);
-    }
-
-    function handleCommand(transcript) {
-      const command = transcript.toLowerCase();
-
-      if (
-        command.includes("hello") ||
-        command.includes("hey guardian")
-      ) {
-        speak(
-          "Good day. MNL Guardian is online and ready."
-        );
-      } else if (
-        command.includes("how are you") ||
-        command.includes("business today")
-      ) {
-        speak(
-          "I am ready to assist. Your business systems " +
-          "are not connected yet."
-        );
-      } else if (command.includes("your name")) {
-        speak(
-          "I am MNL Guardian, your business assistant."
-        );
-      } else if (command.includes("stop")) {
-        window.speechSynthesis.cancel();
-        setStatus("Guardian has stopped speaking.");
-      } else {
-        speak(
-          "I heard you say: " + transcript +
-          ". My business integrations are not connected yet."
-        );
-      }
-    }
-
-    if (!SpeechRecognition) {
-      talkButton.disabled = true;
-
-      setStatus(
-        "Speech recognition is not supported in this browser."
-      );
-    } else {
-      recognition = new SpeechRecognition();
-
-      recognition.lang = "en-US";
-      recognition.continuous = false;
-      recognition.interimResults = false;
-      recognition.maxAlternatives = 1;
-
-      recognition.onstart = () => {
-        listening = true;
-        orb.classList.add("listening");
-        setStatus("Listening. Speak now.");
-      };
-
-      recognition.onresult = event => {
-        const transcript =
-          event.results[0][0].transcript.trim();
-
-        heardText.textContent = transcript;
-        setStatus("Voice received.");
-
-        handleCommand(transcript);
-      };
-
-      recognition.onerror = event => {
-        const messages = {
-          "not-allowed":
-            "Microphone access was denied. Check browser permissions.",
-          "service-not-allowed":
-            "The browser speech service is not permitted.",
-          "no-speech":
-            "I did not hear anything. Please try again.",
-          "network":
-            "The speech service reported a network error.",
-          "audio-capture":
-            "No working microphone was detected."
-        };
-
-        setStatus(
-          messages[event.error] ||
-          "Speech recognition error: " + event.error
-        );
-      };
-
-      recognition.onend = () => {
-        listening = false;
-        orb.classList.remove("listening");
-      };
-
-      talkButton.addEventListener("click", () => {
-        if (listening) return;
-
-        window.speechSynthesis.cancel();
-
-        try {
-          recognition.start();
-        } catch (error) {
-          setStatus(
-            "Guardian could not start listening. Please try again."
-          );
+      audio.play().catch(() => {
+        if (activeSession === session) {
+          audio.controls = true;
         }
       });
+    };
 
-      stopButton.addEventListener("click", () => {
-        if (listening) {
-          recognition.stop();
+    for (const track of session.stream.getAudioTracks()) {
+      pc.addTrack(track, session.stream);
+    }
+
+    const channel = pc.createDataChannel("oai-events");
+    session.channel = channel;
+
+    channel.onopen = () => {
+      if (activeSession !== session) return;
+
+      setStatus("Guardian is online. Speak naturally.");
+      orb.classList.add("listening");
+      heardText.textContent = "Live voice session connected.";
+    };
+
+    channel.onmessage = event => {
+      if (activeSession !== session) return;
+
+      try {
+        const data = JSON.parse(event.data);
+
+        if (data.type === "input_audio_buffer.speech_started") {
+          setStatus("Guardian is listening...");
+          heardText.textContent = "Speech detected.";
         }
 
-        window.speechSynthesis.cancel();
-        orb.classList.remove("listening");
+        if (data.type === "response.created") {
+          setStatus("Guardian is responding...");
+        }
 
-        setStatus("Guardian stopped.");
-      });
+        if (data.type === "response.done") {
+          setStatus("Guardian is ready.");
+        }
+
+        if (
+          data.type ===
+          "conversation.item.input_audio_transcription.completed"
+        ) {
+          heardText.textContent = data.transcript;
+        }
+
+        if (data.type === "error") {
+          setStatus("Guardian encountered a session error.");
+        }
+      } catch {
+        // Ignore non-JSON messages.
+      }
+    };
+
+    pc.onconnectionstatechange = () => {
+      if (activeSession !== session) return;
+
+      if (pc.connectionState === "failed") {
+        stopGuardian("Connection failed. Please try again.");
+      }
+    };
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+
+    const tokenResponse = await fetch(endpoint.href, {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer " + token
+      },
+      cache: "no-store",
+      redirect: "error",
+      signal: session.controller.signal
+    });
+
+    token = "";
+
+    if (!tokenResponse.ok) {
+      throw new Error("Guardian server: HTTP " + tokenResponse.status);
     }
+
+    const credentials = await tokenResponse.json();
+
+    if (!credentials.value) {
+      throw new Error("Session credentials unavailable.");
+    }
+
+    const connection = await fetch(
+      "https://api.openai.com/v1/realtime/calls",
+      {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + credentials.value,
+          "Content-Type": "application/sdp"
+        },
+        body: offer.sdp,
+        signal: session.controller.signal
+      }
+    );
+
+    if (!connection.ok) {
+      throw new Error("OpenAI connection: HTTP " + connection.status);
+    }
+
+    await pc.setRemoteDescription({
+      type: "answer",
+      sdp: await connection.text()
+    });
+
+  } catch (error) {
+    if (activeSession === session) {
+      stopGuardian("Connection error: " + error.message);
+    }
+  } finally {
+    token = "";
+  }
+}
+
+talkButton.addEventListener("click", startGuardian);
+
+stopButton.addEventListener("click", () => {
+  stopGuardian();
+});
+
+window.addEventListener("pagehide", () => {
+  stopGuardian();
+});
   </script>
 </body>
 </html>
